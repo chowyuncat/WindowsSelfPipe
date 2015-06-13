@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 
+#include "portable_thread.h"
 
 static inline void pair(SOCKET fds[2])
 {
@@ -94,11 +95,13 @@ int main()
             exit(1);
         }
         //printf("sockets: %d, %d\n", sockets[0], sockets[1]);
-        const HANDLE thread = reinterpret_cast<HANDLE>(_beginthreadex(NULL, 0, threadproc, &sockets, 0, 0));
+
+        portable_thread_t thread;
+        portable_thread_create(&thread, threadproc, &sockets);
 
         send(sockets[1], &kCancelChar, kCancelLength, 0);
-        WaitForSingleObject(thread, INFINITE);
-        CloseHandle(thread);
+
+        portable_thread_join(thread);
         printf("Done with %8d\n", i);
         closesocket(sockets[0]);
         closesocket(sockets[1]);
