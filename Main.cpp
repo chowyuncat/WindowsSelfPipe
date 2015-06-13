@@ -10,6 +10,8 @@
 
 #include "portable_thread.h"
 
+#include "EventManager.hpp"
+
 static inline void pair(SOCKET fds[2])
 {
     // TODO: consider socketpair on Linux
@@ -63,9 +65,9 @@ static unsigned int __stdcall threadproc(void *args)
         FD_ZERO(&fds);
         FD_SET(sockets[0], &fds);
         timeval tv;
-        tv.tv_sec = 1;
+        tv.tv_sec = 2;
         tv.tv_usec = 0;
-        select(1, &fds, NULL, NULL, &tv);
+        select(2, &fds, NULL, NULL, &tv);
         if (FD_ISSET(sockets[0], &fds))
         {
             char discard;
@@ -77,6 +79,9 @@ static unsigned int __stdcall threadproc(void *args)
             // printf("woke up with nothing to do\n");
         }
     }
+
+    closesocket(sockets[0]);
+    closesocket(sockets[1]);
     return 0;
 }
 
@@ -85,7 +90,9 @@ int main()
     WSADATA wsaData;
     WSAStartup(MAKEWORD(1,1), &wsaData);
 
-    for (int i = 0; i < INT_MAX; ++i)
+#if 1
+    int i;
+    for (i = 0; i < 1000; ++i)
     {
         SOCKET sockets[2];
         pair(sockets);
@@ -102,10 +109,14 @@ int main()
         send(sockets[1], &kCancelChar, kCancelLength, 0);
 
         portable_thread_join(thread);
-        printf("Done with %8d\n", i);
-        closesocket(sockets[0]);
-        closesocket(sockets[1]);
     }
+
+    printf("Done with %8d\n", i);
+#endif
+
+    EventManager em;
+    em.start();
+    em.stop();
 
     return 0;
 }
