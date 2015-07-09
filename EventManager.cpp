@@ -6,7 +6,12 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <process.h>
+
 #include <stdio.h>
+
+#include <stdint.h>
+
+
 #define  __PORT_H__0396846
 #		define BVTUTIL_EXPORT
 #ifndef __GNUC__
@@ -39,6 +44,24 @@ static int gettimeofday(struct timeval *tv, struct timezone* unused)
 
 		return 0;
 	}
+
+#ifdef _WIN32
+#include <string>
+static std::wstring WSAGetErrorString(DWORD errorCode)
+{
+    LPWSTR *wszSockError = NULL;
+    FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                    NULL,
+                    errorCode,
+                    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                    (LPWSTR)&wszSockError,
+                    0,
+                    NULL);
+    std::wstring error((LPWSTR)wszSockError);
+	LocalFree(wszSockError);
+    return error;
+}
+#endif
 
 #include <errno.h>
 
@@ -143,7 +166,6 @@ static inline void pair(SOCKET fds[2])
 
 EventManager::EventManager()
 {
-	pair(m_pipe);
 }
 
 EventManager::~EventManager()
@@ -160,35 +182,6 @@ void EventManager::add(FDEventBase* val)
 	m_events.push_back(val);
 }
 
-void EventManager::add(TimerEventBase* val)
-{
-	if( val == NULL )
-		return;
-
-	ScopedLock _(&m_lock);
-	m_timers.push_back(val);
-	sort(m_timers.begin(), m_timers.end());
-}
-
-void EventManager::remove(TimerEventBase* val)
-{
-	if( val == NULL )
-		return;
-
-	ScopedLock _(&m_lock);
-	TimerList_t::iterator i = m_timers.begin();
-	while (i != m_timers.end())
-	{
-		TimerList_t::iterator j = i;
-		i++;
-
-		if ((*j) == val)
-		{
-			m_timers.erase(j);
-			break;
-		}
-	}
-}
 
 void EventManager::remove(FDEventBase* val)
 {
@@ -220,15 +213,21 @@ static void __stdcall UserAPC_CloseSocket(ULONG_PTR userData)
 }
 #endif
 
-static const char kCancelChar = '?';
+static const char kCancelChar[] = "??????????";
 static const int kCancelLength = 1;
 
 RetVal EventManager::start()
 {
+    m_pipelock.Lock();
+	pair(m_pipe);
     if (m_pipe[0] == INVALID_SOCKET || m_pipe[1] == INVALID_SOCKET)
     {
+        m_pipelock.Unlock();
+
         return ReturnCode::FAILED;
     }
+    m_pipelock.Unlock();
+
     return Thread::start();
 }
 
@@ -247,8 +246,8 @@ void EventManager::stop()
 	if (local_running)
 	{
         printf("Writing to cancel\n");
-		int sent = send(m_pipe[1], &kCancelChar, kCancelLength, 0);
-        printf("Wrote %d to cancel\n", sent);
+		int sent = send(m_pipe[1], kCancelChar, 1, 0);
+        printf("Wrote %d bytes to cancel\n", sent);
 
 	}
 
@@ -266,11 +265,22 @@ void EventManager::stop()
 
 void EventManager::Run()
 {
+    printf("RUN START\n");
+    SOCKET local_pipe[2];
+    m_pipelock.Lock();
+    memcpy(local_pipe, m_pipe, sizeof(SOCKET) * 2);
+    m_pipelock.Unlock();
+
+    
+
+    LARGE_INTEGER run_start;
+    QueryPerformanceCounter(&run_start);
+
 	RetVal status = ReturnCode::SUCCESS;
-    int a = 0;
-	while( running() && (status == ReturnCode::SUCCESS) )
+	//while( running() && (status == ReturnCode::SUCCESS) )
+	while( (status == ReturnCode::SUCCESS) )
 	{
-		m_lock.Lock();
+		//m_lock.Lock();
 		
 		// set fds bits and determine highest file descriptor
 		fd_set fds;
@@ -290,53 +300,39 @@ void EventManager::Run()
 			// HACK: FD_SET(fd, &fds);
 		}
 
-		// determine the relative time for the oldest item in the time queue.
-		// TODO: HACK: this loop will wake once a second even if no events are ready
 		struct timeval tv;
-		if (m_timers.empty())
-		{
-			tv.tv_sec = 0;
-		}
-		else
-		{
-			struct timeval tmp_tv;
-			::gettimeofday(&tmp_tv, NULL);
-			//BVT_LOG(LOG_DEBUG, "expires: %d now: %d", m_timers[0]->seconds(), tmp_tv.tv_sec);
-			if( tmp_tv.tv_sec < m_timers[0]->seconds() )
-				tv.tv_sec = 0; //m_timers[0]->seconds() - tmp_tv.tv_sec;
-			else
-				tv.tv_sec = 0;
-		}
-		//BVT_LOG(LOG_DEBUG, "tv_sec:%d", tv.tv_sec);
-		tv.tv_sec = 5;
+		tv.tv_sec = 2;
 		tv.tv_usec = 500 * 1000;
-		
-		m_lock.Unlock();
+		//m_lock.Unlock();
 
-		FD_SET(m_pipe[0], &fds);
-		fd_max = SOCKETMAX(fd_max, m_pipe[0]);
+		FD_SET(local_pipe[0], &fds);
+		fd_max = SOCKETMAX(fd_max, local_pipe[0]);
 		// Windows' select MUST have a valid fd, but the first (fd_max) parameter is ignored
-		const int ret = select(fd_max + 1, &fds, NULL, NULL, &tv);
+		const int ret = select(fd_max + 1, &fds, NULL, &fds, &tv);
 
-		m_lock.Lock();
+		//m_lock.Lock();
 
 		switch(ret)
 		{
 			case 0: // timedout
 				//BVT_LOG(LOG_TRACE, "EventManager - select timeout");
-				processTimers();
+				printf("EventManager - select timeout\n");
+                {
+                    std::wstring errorstring = WSAGetErrorString(WSAGetLastError());
+                    wprintf(L"Error: %s\n", errorstring.c_str());
+                }
 				status = ReturnCode::SUCCESS;
 				break;
 
 			case -1: // error
 				//BVT_LOG(LOG_DEBUG, "EventManager - select returned -1 %d %s", errno, strerror(errno));
+				printf("EventManager - select failed\n");
 				if (errno != EINTR)
 					status = ReturnCode::SOCKET_READ;
 				break;
 
 			default: // data 
-				status = processTimers();
-
+				// printf("EventManager - select returned at least one FD ready\n");
 				for (EventList_t::iterator i = m_events.begin(); i != m_events.end(); i++)
 				{
 					SOCKET fd = (*i)->fd();
@@ -347,72 +343,45 @@ void EventManager::Run()
 					}
 				}
 
-				if (FD_ISSET(m_pipe[0], &fds))
+				if (FD_ISSET(local_pipe[0], &fds))
 				{
 					char discard;
                     LARGE_INTEGER start, stop;
                     QueryPerformanceCounter(&start);
-					if (kCancelLength != recv(m_pipe[0], &discard, kCancelLength, 0))
+					if (kCancelLength != recv(local_pipe[0], &discard, kCancelLength, 0))
 					{
-                        a= 2;
 						BVT_LOG("EventManager cancel socket error\n");
 					}
                     else
                     {
-                        a = 1;
+                        Sleep(1);
                     }
-                    //Sleep(1);
+                    // Sleep(1);
                     QueryPerformanceCounter(&stop);
-                    a = (int)(stop.QuadPart - start.QuadPart);
-
-					break;
+					goto LABEL_DONE; // HACK: skips unlock
 				}
 		}
         // Sleep(1);
-		m_lock.Unlock();
+		//m_lock.Unlock();
 
 	}
-    printf("a:%d\n", a);
+   
+LABEL_DONE:
+    LARGE_INTEGER run_stop;
 
-	closesocket(m_pipe[0]);
-	closesocket(m_pipe[1]);
+    QueryPerformanceCounter(&run_stop);
+    LONGLONG total = run_stop.QuadPart - run_start.QuadPart;
+    printf("run total: %ld\n", total);
+
+
+	closesocket(local_pipe[0]);
+	closesocket(local_pipe[1]);
+
+ 
+
 	// if( status != BVT::ReturnCode::SUCCESS )
-		BVT_LOG("EventManager::Run() exiting: retval:%d errno:%d", status, errno);
+		BVT_LOG("EventManager::Run() exiting: retval:%d errno:%d\n", status, errno);
 }
 
-RetVal  EventManager::processTimers()
-{
-	RetVal status = ReturnCode::SUCCESS;
 
-    struct timeval  tv;
-	::gettimeofday(&tv, NULL);
-
-	bool resort = false;
-	//tv.tv_sec  -= m_timers[0]->time().tv_sec;
-
-	for (TimerList_t::iterator i = m_timers.begin(); i != m_timers.end() ; i++)
-	{
-//		BVT_LOG(LOG_DEBUG, "%d %d", tv.tv_sec, (*i)->seconds());
-		if( tv.tv_sec < (*i)->seconds() )
-			break;
-
-		TimerList_t::iterator j = i;
-
-		//BVT_LOG(LOG_DEBUG, "Timer expired");
-		RetVal tstatus = (*j)->TimerExpired(this);
-		if (!(*j)->reschedule())
-		{
-			resort = true;
-			m_timers.erase(j);
-		}
-
-		// feedback the first failed callback
-		if (status == ReturnCode::SUCCESS && 
-				tstatus != ReturnCode::SUCCESS) status = tstatus;
-	}
-
-	if( resort )
-		sort(m_timers.begin(), m_timers.end());
-	return status;
-}
 

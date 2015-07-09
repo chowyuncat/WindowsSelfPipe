@@ -49,3 +49,4 @@ Temporary Items
 *.tlog
 *.ilk
 *.obj
+*.suo

@@ -6,10 +6,9 @@
 #include "ScopedLock.hpp"
 
 Thread::Thread() :
-	m_start_mutex(false),
-	m_stop_mutex(false),
+	m_start_mutex(true),
 	m_running(false),
-	m_stop_requested(false)
+	m_stop_requested(0)
 	// m_tid cannot be initialized because when portable_thread_t is a pthread_t, it's an opaque type
 {
 }
@@ -51,9 +50,7 @@ void Thread::stop()
 
 	if (copy_of_m_running)
 	{
-		m_stop_mutex.Lock();
-		m_stop_requested = true;
-		m_stop_mutex.Unlock();
+        InterlockedCompareExchange(&m_stop_requested, 1, 0);
 
 		portable_thread_join(m_tid);
 
@@ -68,8 +65,6 @@ bool Thread::running()
 	// This function is called in many places by a derived class
 	// to check to see if its Run method should stop executing.  It
 	// should be renamed to stop_requested() or similar
-	m_stop_mutex.Lock();
-	const bool copy = ! m_stop_requested;
-	m_stop_mutex.Unlock();
-	return copy;
+    const unsigned int copy = InterlockedExchangeAdd(&m_stop_requested, 0);
+	return copy == 0;
 }

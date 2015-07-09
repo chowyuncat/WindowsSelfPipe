@@ -26,10 +26,9 @@ public:
 
 protected:
     MutexLock m_start_mutex;
-    MutexLock m_stop_mutex;
     portable_thread_t m_tid;
     bool m_running;
-    bool m_stop_requested;
+    unsigned int m_stop_requested;
 
 };
 #endif

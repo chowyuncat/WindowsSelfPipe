@@ -45,7 +45,7 @@ static inline void pair(SOCKET fds[2])
 	setsockopt(fds[0], SOL_SOCKET, SO_LINGER, (const char*)&dontlinger, sizeof(dontlinger));
 	setsockopt(fds[1], SOL_SOCKET, SO_LINGER, (const char*)&dontlinger, sizeof(dontlinger));
 
-#if 0
+#if 1
 	unsigned long val = 0;
 	::ioctlsocket(fds[0], FIONBIO, &val);
 	::ioctlsocket(fds[1], FIONBIO, &val);
@@ -85,12 +85,8 @@ static unsigned int __stdcall threadproc(void *args)
     return 0;
 }
 
-int main()
+static void simple()
 {
-    WSADATA wsaData;
-    WSAStartup(MAKEWORD(1,1), &wsaData);
-
-#if 1
     int i;
     for (i = 0; i < 1000; ++i)
     {
@@ -112,10 +108,20 @@ int main()
     }
 
     printf("Done with %8d\n", i);
+}
+
+int main()
+{
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(1,1), &wsaData);
+
+#if 1
+    simple();
 #endif
 
     EventManager em;
     em.start();
+    Sleep(1);
     em.stop();
 
     return 0;

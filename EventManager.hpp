@@ -56,25 +56,23 @@ public:
 	virtual ~EventManager();
 		
 	void add(FDEventBase* val);
-	void add(TimerEventBase* val);
-		
+
+
 	void remove(FDEventBase* val);
-	void remove(TimerEventBase* val);
+
 
 	virtual RetVal start();
 	virtual void stop();
 	virtual void Run();
 
 protected:
-	RetVal processTimers();
-		
+
 	typedef std::vector<FDEventBase*> EventList_t;
-	typedef std::vector<TimerEventBase*> TimerList_t;
 
 	EventList_t m_events;
-	TimerList_t m_timers;
 
 	MutexLock m_lock;
+    MutexLock m_pipelock;
 	SOCKET m_pipe[2];
 }; // EventManager
 
